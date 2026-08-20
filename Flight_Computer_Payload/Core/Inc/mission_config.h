@@ -78,6 +78,8 @@
 #define PYRO_FIRE_PULSE_MS            1500U    /* Duración de pulso de disparo PA0 */
 
 /* ==================== COMANDOS DE ENLACE ASCENDENTE (Uplink) =============== */
+#define CMD_SYS_CALIBRATE_STR   "SYS_CALIBRATE"
+#define CMD_SYS_ARM_STR         "SYS_ARM"
 #define CMD_SYS_ABORT_STR       "SYS_ABORT"
 #define CMD_FORCE_DEPLOY_STR    "FORCE_DEPLOY"
 #define CMD_MAX_LEN              32U

@@ -65,7 +65,11 @@ bool LoRa_ParsePendingCommandFromISR(lora_e220_handle_t *dev, ground_cmd_t *out_
         return false;
     }
 
-    if (strncmp(dev->cmd_line_buf, CMD_SYS_ABORT_STR, sizeof(CMD_SYS_ABORT_STR)) == 0) {
+    if (strncmp(dev->cmd_line_buf, CMD_SYS_CALIBRATE_STR, sizeof(CMD_SYS_CALIBRATE_STR)) == 0) {
+        *out_cmd = GROUND_CMD_SYS_CALIBRATE;
+    } else if (strncmp(dev->cmd_line_buf, CMD_SYS_ARM_STR, sizeof(CMD_SYS_ARM_STR)) == 0) {
+        *out_cmd = GROUND_CMD_SYS_ARM;
+    } else if (strncmp(dev->cmd_line_buf, CMD_SYS_ABORT_STR, sizeof(CMD_SYS_ABORT_STR)) == 0) {
         *out_cmd = GROUND_CMD_SYS_ABORT;
     } else if (strncmp(dev->cmd_line_buf, CMD_FORCE_DEPLOY_STR, sizeof(CMD_FORCE_DEPLOY_STR)) == 0) {
         *out_cmd = GROUND_CMD_FORCE_DEPLOY;

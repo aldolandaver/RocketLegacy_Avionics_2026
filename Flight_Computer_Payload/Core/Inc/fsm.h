@@ -42,11 +42,25 @@ typedef struct {
 
     uint32_t mission_time_ms;
     uint8_t  pyro_fired;
+    uint8_t  armed;         /* 1 tras SYS_ARM, 0 en caso contrario           */
+    uint8_t  pyro_locked;   /* 1 tras SYS_ABORT: disparo inhabilitado        */
 } telemetry_snapshot_t;
 
-/* Flags de comando de tierra recibidos por uplink LoRa (ISR -> tarea) */
+/* Flags de comando de tierra recibidos por uplink LoRa (ISR -> tarea).
+ * Semántica (Tabla 18 del CDR):
+ *   - SYS_CALIBRATE: repite la calibración de sesgo/altitud base. Solo
+ *     tiene efecto en PAD_IDLE.
+ *   - SYS_ARM: desbloquea la barrera de software de disparo. Sin este
+ *     comando, PAD_IDLE nunca transiciona a POWERED_ASCENT aunque se
+ *     detecte la aceleración de despegue.
+ *   - SYS_ABORT: BLOQUEA permanentemente el disparo (no lo activa). Es un
+ *     candado de seguridad en tierra, no un disparo forzado.
+ *   - FORCE_DEPLOY: único comando que fuerza el disparo inmediato,
+ *     ignorando el criterio del KF. Respeta el bloqueo de SYS_ABORT. */
 typedef enum {
     GROUND_CMD_NONE = 0,
+    GROUND_CMD_SYS_CALIBRATE,
+    GROUND_CMD_SYS_ARM,
     GROUND_CMD_SYS_ABORT,
     GROUND_CMD_FORCE_DEPLOY
 } ground_cmd_t;

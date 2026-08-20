@@ -36,6 +36,19 @@ static float    s_prev_altitude_for_landing_m = 0.0f;
 static volatile bool s_pyro_fire_event = false;
 static volatile bool s_pyro_already_fired = false;
 
+/* Barrera de seguridad de software (Tabla 18 del CDR):
+ *   - s_armed:       arranca en false. Solo SYS_ARM lo pone en true; solo
+ *                     entonces PAD_IDLE puede transicionar a ASCENT.
+ *   - s_pyro_locked:  arranca en false. SYS_ABORT lo pone en true de forma
+ *                     PERMANENTE para la sesión de vuelo actual (no hay
+ *                     comando que lo revierta): ni el apogeo automático ni
+ *                     FORCE_DEPLOY pueden disparar el pyro mientras esté
+ *                     activo. Solo un reinicio físico de la placa lo limpia.
+ */
+static volatile bool s_armed = false;
+static volatile bool s_pyro_locked = false;
+static volatile bool s_recalibrate_requested = false;
+
 void FSM_Init(void)
 {
     s_state = MISSION_STATE_INIT;
@@ -44,6 +57,9 @@ void FSM_Init(void)
     s_pyro_fire_event = false;
     s_pyro_already_fired = false;
     s_ascent_kf_initialized = false;
+    s_armed = false;
+    s_pyro_locked = false;
+    s_recalibrate_requested = false;
 }
 
 mission_state_t FSM_GetState(void)
@@ -76,6 +92,11 @@ bool FSM_ConsumePyroFireEvent(void)
 
 static void request_pyro_fire(void)
 {
+    /* SYS_ABORT tiene prioridad absoluta: si el pyro está bloqueado, ni el
+     * apogeo automático ni FORCE_DEPLOY pueden encenderlo. */
+    if (s_pyro_locked) {
+        return;
+    }
     if (!s_pyro_already_fired) {
         s_pyro_already_fired = true;
         s_pyro_fire_event = true;
@@ -86,9 +107,39 @@ void FSM_HandleGroundCommand(ground_cmd_t cmd)
 {
     taskENTER_CRITICAL();
     switch (cmd) {
+        case GROUND_CMD_SYS_CALIBRATE:
+            /* Solo tiene sentido con el vehículo estático en rampa. Se
+             * limita a levantar una bandera; el recálculo real de
+             * baseline/sesgo ocurre dentro de run_pad_idle() usando la
+             * MISMA muestra que ya llegó ese ciclo por parámetro (in),
+             * para no tener que leer los sensores desde este contexto y
+             * competir por el bus SPI/I2C con la tarea de fusión sensorial. */
+            if (s_state == MISSION_STATE_PAD_IDLE) {
+                s_recalibrate_requested = true;
+            }
+            break;
+
+        case GROUND_CMD_SYS_ARM:
+            /* Desbloquea la barrera de software: sin este comando,
+             * run_pad_idle() nunca deja pasar a POWERED_ASCENT aunque
+             * detecte la aceleración de despegue. */
+            if (s_state == MISSION_STATE_PAD_IDLE) {
+                s_armed = true;
+            }
+            break;
+
+        case GROUND_CMD_SYS_ABORT:
+            /* Candado de seguridad en tierra: BLOQUEA el disparo, no lo
+             * activa. Es permanente para esta sesión de vuelo (no hay
+             * comando de "des-abort"; requiere reiniciar la placa). */
+            s_pyro_locked = true;
+            s_armed = false;
+            break;
+
         case GROUND_CMD_FORCE_DEPLOY:
-            /* Override manual: dispara el nicromo sin esperar el cruce por
-             * cero de velocidad. Válido en PAD_IDLE, ASCENT o DESCENT. */
+            /* Único comando que fuerza el disparo, ignorando el criterio
+             * del KF. Válido en PAD_IDLE, ASCENT o DESCENT, y sigue sujeto
+             * al bloqueo de SYS_ABORT (ver request_pyro_fire). */
             if (s_state == MISSION_STATE_PAD_IDLE ||
                 s_state == MISSION_STATE_POWERED_ASCENT ||
                 s_state == MISSION_STATE_DESCENT) {
@@ -98,14 +149,6 @@ void FSM_HandleGroundCommand(ground_cmd_t cmd)
                     s_landed_hold_ms = 0u;
                 }
             }
-            break;
-
-        case GROUND_CMD_SYS_ABORT:
-            /* Abort total de misión: fuerza recuperación inmediata y salta
-             * directo a modo baliza, deteniendo cualquier lógica de vuelo
-             * activo (usado ante telemetría anómala o pérdida de control). */
-            request_pyro_fire();
-            s_state = MISSION_STATE_RESCUE_BEACON;
             break;
 
         default:
@@ -127,10 +170,32 @@ static float accel_g_to_linear_ms2(float accel_z_g)
 
 static void run_pad_idle(const fsm_sensor_input_t *in, float dt_s)
 {
+    /* SYS_CALIBRATE: recalibración instantánea con la muestra de este
+     * ciclo (no repite el promediado de ~2 s de la calibración inicial de
+     * Estado 0->1; se asume que el equipo de campo ya confirmó visualmente
+     * que el vehículo está estático antes de mandar el comando). */
+    if (s_recalibrate_requested) {
+        if (in->new_baro_sample) {
+            float new_bias_ms2 = (in->accel_z_g - 1.0f) * GRAVITY_MS2;
+            KF_Init(&s_kf, 0.0f, new_bias_ms2);
+            s_pad_baseline_pressure_pa = in->baro_pressure_pa;
+            s_recalibrate_requested = false;
+        }
+        /* Si aún no hay muestra barométrica nueva este ciclo, se reintenta
+         * en el siguiente (50 Hz) — no bloquea el resto de la FSM. */
+    }
+
+    if (!s_armed) {
+        /* Sin SYS_ARM, ni siquiera se acumula el temporizador de despegue:
+         * el sistema se queda en PAD_IDLE indefinidamente por diseño. */
+        s_launch_hold_ms = 0u;
+        return;
+    }
+
     if (in->accel_z_g >= LAUNCH_ACCEL_THRESHOLD_G) {
         s_launch_hold_ms += (uint32_t)(dt_s * 1000.0f);
         if (s_launch_hold_ms >= LAUNCH_ACCEL_HOLD_MS) {
-            /* Estado 1 -> Estado 2: despegue confirmado */
+            /* Estado 1 -> Estado 2: despegue confirmado y sistema armado */
             s_state = MISSION_STATE_POWERED_ASCENT;
             s_prev_vertical_velocity_ms = s_kf.x[1];
             s_ascent_kf_initialized = true;
@@ -237,5 +302,7 @@ void FSM_RunStep(const fsm_sensor_input_t *in, float dt_s, telemetry_snapshot_t 
         out_snap->gnss_alt_msl_m   = in->gnss_alt_msl_m;
         out_snap->gnss_fix_valid   = in->gnss_fix_valid;
     }
-    out_snap->pyro_fired = s_pyro_already_fired ? 1u : 0u;
+    out_snap->pyro_fired   = s_pyro_already_fired ? 1u : 0u;
+    out_snap->armed        = s_armed ? 1u : 0u;
+    out_snap->pyro_locked  = s_pyro_locked ? 1u : 0u;
 }
