@@ -196,9 +196,3 @@ cohete/
 6. Compilar y flashear vía ST-Link.
 
 > **Pendiente:** ni `payload/` ni `cohete/` usan todavía los bloques `/* USER CODE BEGIN X */ ... /* USER CODE END X */` que CubeMX necesita para no borrar el código al regenerar desde el `.ioc`. Hay que resolver eso antes de tocar el editor gráfico de nuevo (ver conversación previa).
-
-## 4. Pendientes conocidos
-
-- [ ] Corregir la semántica de `SYS_ABORT`/`SYS_ARM`/`SYS_CALIBRATE` en `fsm.c` y `freertos_tasks.c` del payload para que coincida con la Tabla 18 del CDR (documentado arriba en la Sección 1.6, todavía no implementado en código).
-- [ ] Reestructurar `main.c`/`stm32f4xx_it.c` de ambos proyectos con los marcadores `USER CODE BEGIN/END` de CubeMX.
-- [ ] Confirmar con el equipo si el evento de disparo del cohete es mecánicamente único (un pulso libera ambas cosas) o si en algún momento se necesitará un segundo canal de disparo.
