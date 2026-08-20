@@ -195,4 +195,3 @@ cohete/
 5. Verificar que el FPU esté habilitado: `-mfpu=fpv4-sp-d16 -mfloat-abi=hard -mcpu=cortex-m4`.
 6. Compilar y flashear vía ST-Link.
 
-> **Pendiente:** ni `payload/` ni `cohete/` usan todavía los bloques `/* USER CODE BEGIN X */ ... /* USER CODE END X */` que CubeMX necesita para no borrar el código al regenerar desde el `.ioc`. Hay que resolver eso antes de tocar el editor gráfico de nuevo (ver conversación previa).
